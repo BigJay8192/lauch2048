@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Dice Merge 3D - Mobile Edition</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tween.js/18.6.4/tween.umd.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;800&display=swap');
+        
+        body {
+            font-family: 'Poppins', sans-serif;
+            background-color: #020617;
+            color: #ffffff;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            touch-action: none;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+
+        #canvas-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+        }
+
+        .ui-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 10;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: env(safe-area-inset-top) 1rem env(safe-area-inset-bottom) 1rem;
+        }
+
+        .pointer-events-auto {
+            pointer-events: auto;
+        }
+
+        .die-preview-ui {
+            width: 50px;
+            height: 50px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 800;
+            font-size: 1.2rem;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+            transition: all 0.2s ease;
+        }
+
+        .bg-2 { background: #ffffff; color: #1e293b; }
+        .bg-4 { background: #cbd5e1; color: #1e293b; }
+        .bg-8 { background: #fbbf24; color: #78350f; }
+        .bg-16 { background: #f59e0b; color: #fff; }
+        .bg-32 { background: #ea580c; color: #fff; }
+        .bg-64 { background: #dc2626; color: #fff; }
+        .bg-128 { background: #db2777; color: #fff; }
+        .bg-256 { background: #9333ea; color: #fff; }
+        .bg-512 { background: #4f46e5; color: #fff; }
+        .bg-1024 { background: #2563eb; color: #fff; }
+        .bg-2048 { background: #ffd700; color: #000; box-shadow: 0 0 15px #ffd700; }
+
+        .active-preview {
+            transform: scale(1.1);
+            border: 3px solid #6366f1;
+        }
+
+        #instruction {
+            position: absolute;
+            top: 12%;
+            left: 50%;
+            transform: translateX(-50%);
+            text-align: center;
+            opacity: 0.5;
+            font-size: 0.7rem;
+            letter-spacing: 0.1rem;
+            text-transform: uppercase;
+            font-weight: bold;
+            pointer-events: none;
+            width: 80%;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="canvas-container"></div>
+    <div id="instruction">Maintenir pour la puissance (Jaune)</div>
+
+    <div class="ui-overlay">
+        <!-- En-tête -->
+        <div class="flex justify-between items-start mt-4">
+            <div>
+                <h1 class="text-3xl font-black italic tracking-tighter uppercase text-white leading-none">
+                    DICE <span class="text-yellow-500">PRO</span>
+                </h1>
+                <p class="text-[8px] font-bold uppercase tracking-widest text-slate-400 mt-1">Smarphone · 9 Cases</p>
+            </div>
+            <div class="bg-slate-900/80 backdrop-blur-md border border-white/10 px-4 py-2 rounded-2xl text-right">
+                <span id="score" class="text-2xl font-black text-yellow-400">0</span>
+                <span class="text-[8px] uppercase font-bold text-slate-500 block">Score</span>
+            </div>
+        </div>
+
+        <!-- Contrôles Bas -->
+        <div class="flex flex-col items-center gap-4 mb-8">
+            <div class="w-full max-w-sm bg-slate-900/90 backdrop-blur-xl p-4 rounded-3xl border border-white/10 pointer-events-auto shadow-2xl">
+                <div class="flex justify-between items-center">
+                    <div class="flex flex-col">
+                        <span class="text-[8px] font-black uppercase tracking-widest text-yellow-400 mb-1">Suivants</span>
+                        <div id="queue-display" class="flex gap-2"></div>
+                    </div>
+                    <button id="reset-btn" class="p-4 rounded-xl bg-slate-800 hover:bg-slate-700 active:scale-90 transition-all">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- CONFIGURATION ---
+        const ARENA_WIDTH = 6;
+        const ARENA_DEPTH = 9; // Réduit encore de 3 cases (Total 9)
+        const HALF_DEPTH = ARENA_DEPTH / 2;
+        const DICE_SIZE = 1.0;
+        const GRAVITY = 0.015;
+        const COLORS = {
+            2: 0xffffff, 4: 0xcbd5e1, 8: 0xfbbf24, 16: 0xf59e0b, 32: 0xea580c,
+            64: 0xdc2626, 128: 0xdb2777, 256: 0x9333ea, 512: 0x4f46e5, 1024: 0x2563eb, 2048: 0xffd700
+        };
+
+        let scene, camera, renderer;
+        let diceList = [];
+        let diceQueue = [];
+        let score = 0;
+        let isProcessing = false;
+        let previewDie = null;
+        let powerBarBase, powerBarFill; // Objets 3D pour la barre de puissance
+        let mouseX = 0;
+        
+        let isCharging = false;
+        let chargePower = 0;
+        const MAX_CHARGE = 100;
+        const CHARGE_SPEED = 2.2; // Un peu plus rapide
+        const BASE_VELOCITY = -0.10;
+        const MAX_ADDITIONAL_VELOCITY = -0.45;
+
+        const textureCache = {};
+
+        function init() {
+            setupThreeJS();
+            setupLights();
+            createArena();
+            setupPowerBar(); // Initialise la barre de puissance 3D
+            initGameData();
+            animate();
+            
+            window.addEventListener('resize', onWindowResize);
+            
+            const handleStart = (e) => {
+                if(isProcessing) return;
+                isCharging = true;
+                chargePower = 0;
+                powerBarBase.visible = true;
+                powerBarFill.visible = true;
+                updateInputPos(e);
+            };
+
+            const handleMove = (e) => {
+                updateInputPos(e);
+            };
+
+            const handleEnd = (e) => {
+                if (isCharging) {
+                    onLaunch();
+                    isCharging = false;
+                    powerBarBase.visible = false;
+                    powerBarFill.visible = false;
+                }
+            };
+
+            window.addEventListener('mousedown', handleStart);
+            window.addEventListener('mousemove', handleMove);
+            window.addEventListener('mouseup', handleEnd);
+
+            window.addEventListener('touchstart', (e) => { e.preventDefault(); handleStart(e.touches[0]); }, {passive: false});
+            window.addEventListener('touchmove', (e) => { e.preventDefault(); handleMove(e.touches[0]); }, {passive: false});
+            window.addEventListener('touchend', (e) => { e.preventDefault(); handleEnd(); }, {passive: false});
+
+            document.getElementById('reset-btn').addEventListener('click', (e) => {
+                e.stopPropagation();
+                resetGame();
+            });
+        }
+
+        function setupThreeJS() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x020617);
+            scene.fog = new THREE.Fog(0x020617, 3, 20);
+
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+            // Caméra adaptée à l'arène courte de 9 cases
+            camera.position.set(0, 9, 10); 
+            camera.lookAt(0, 0, 0);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
+            document.getElementById('canvas-container').appendChild(renderer.domElement);
+        }
+
+        function setupLights() {
+            scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+            const sun = new THREE.DirectionalLight(0xffffff, 0.8);
+            sun.position.set(5, 12, 5);
+            sun.castShadow = true;
+            scene.add(sun);
+
+            const fill = new THREE.PointLight(0xfbbf24, 1, 15);
+            fill.position.set(0, 4, 4);
+            scene.add(fill);
+        }
+
+        function createArena() {
+            const floorGeo = new THREE.PlaneGeometry(ARENA_WIDTH + 1, ARENA_DEPTH + 1);
+            const floorMat = new THREE.MeshPhongMaterial({ color: 0x0f172a });
+            const floor = new THREE.Mesh(floorGeo, floorMat);
+            floor.rotation.x = -Math.PI / 2;
+            floor.receiveShadow = true;
+            scene.add(floor);
+
+            const wallMat = new THREE.MeshPhongMaterial({ color: 0xfbbf24, transparent: true, opacity: 0.05 });
+            
+            const backWall = new THREE.Mesh(new THREE.BoxGeometry(ARENA_WIDTH, 6, 0.2), wallMat);
+            backWall.position.set(0, 3, -HALF_DEPTH);
+            scene.add(backWall);
+
+            const sideWallGeo = new THREE.BoxGeometry(0.2, 6, ARENA_DEPTH);
+            const leftWall = new THREE.Mesh(sideWallGeo, wallMat);
+            leftWall.position.set(-ARENA_WIDTH/2, 3, 0);
+            scene.add(leftWall);
+
+            const rightWall = new THREE.Mesh(sideWallGeo, wallMat);
+            rightWall.position.set(ARENA_WIDTH/2, 3, 0);
+            scene.add(rightWall);
+            
+            const grid = new THREE.GridHelper(ARENA_WIDTH, 6, 0x1e293b, 0x334155);
+            grid.position.y = 0.01;
+            grid.scale.z = ARENA_DEPTH / ARENA_WIDTH;
+            scene.add(grid);
+        }
+
+        function setupPowerBar() {
+            // Fond de la barre (translucide)
+            const baseGeo = new THREE.BoxGeometry(1.2, 0.1, 0.15);
+            const baseMat = new THREE.MeshBasicMaterial({ color: 0xfbbf24, transparent: true, opacity: 0.2 });
+            powerBarBase = new THREE.Mesh(baseGeo, baseMat);
+            
+            // Partie remplissage (foncée)
+            const fillGeo = new THREE.BoxGeometry(1, 0.11, 0.16);
+            const fillMat = new THREE.MeshBasicMaterial({ color: 0xfbbf24 });
+            powerBarFill = new THREE.Mesh(fillGeo, fillMat);
+            
+            powerBarBase.visible = false;
+            powerBarFill.visible = false;
+            
+            scene.add(powerBarBase);
+            scene.add(powerBarFill);
+        }
+
+        function initGameData() {
+            diceList.forEach(d => scene.remove(d));
+            diceList = [];
+            diceQueue = Array(4).fill().map(() => generateValue());
+            score = 0;
+            updateUI();
+            updatePreviewDie();
+        }
+
+        function generateValue() {
+            const r = Math.random();
+            if (r > 0.98) return 16;
+            if (r > 0.90) return 8;
+            if (r > 0.70) return 4;
+            return 2;
+        }
+
+        function getDiceTexture(value) {
+            if (textureCache[value]) return textureCache[value];
+            const canvas = document.createElement('canvas');
+            canvas.width = 256; canvas.height = 256;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#' + (COLORS[value].toString(16).padStart(6, '0'));
+            ctx.fillRect(0, 0, 256, 256);
+            ctx.fillStyle = value > 4 ? 'white' : '#1e293b';
+            ctx.font = 'bold 120px Poppins';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(value, 128, 128);
+            const tex = new THREE.CanvasTexture(canvas);
+            textureCache[value] = tex;
+            return tex;
+        }
+
+        function createCube(value) {
+            const size = DICE_SIZE * 0.92;
+            const geometry = new THREE.BoxGeometry(size, size, size);
+            const texture = getDiceTexture(value);
+            const materials = Array(6).fill().map(() => new THREE.MeshPhongMaterial({ map: texture, shininess: 40 }));
+            const mesh = new THREE.Mesh(geometry, materials);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            mesh.userData = { value, velocity: new THREE.Vector3(0,0,0), isAligning: false };
+            return mesh;
+        }
+
+        function updatePreviewDie() {
+            if (previewDie) scene.remove(previewDie);
+            previewDie = createCube(diceQueue[0]);
+            previewDie.material.forEach(m => { m.transparent = true; m.opacity = 0.5; });
+            previewDie.position.set(0, 0.5, HALF_DEPTH - 0.5); 
+            scene.add(previewDie);
+        }
+
+        function updateInputPos(e) {
+            mouseX = (e.clientX / window.innerWidth) * 2 - 1;
+            let tx = mouseX * (ARENA_WIDTH/2 - 0.5);
+            if (previewDie) {
+                previewDie.position.x = tx;
+                // Aligner la barre de puissance au dessus du dé
+                powerBarBase.position.set(tx, 1.8, previewDie.position.z);
+                powerBarFill.position.set(tx, 1.8, previewDie.position.z);
+            }
+        }
+
+        function onLaunch() {
+            if (isProcessing) return;
+            
+            const value = diceQueue.shift();
+            diceQueue.push(generateValue());
+            updateUI();
+
+            const die = createCube(value);
+            die.position.copy(previewDie.position);
+            
+            const powerRatio = chargePower / MAX_CHARGE;
+            const launchVel = BASE_VELOCITY + (powerRatio * MAX_ADDITIONAL_VELOCITY);
+            
+            die.userData.velocity.set(0, 0, launchVel); 
+            diceList.push(die);
+            scene.add(die);
+
+            updatePreviewDie();
+            
+            isProcessing = true;
+            setTimeout(() => { isProcessing = false; }, 300);
+        }
+
+        function updatePhysics() {
+            if (isCharging) {
+                chargePower = Math.min(MAX_CHARGE, chargePower + CHARGE_SPEED);
+                // Mise à jour visuelle de la barre jaune
+                const scaleX = (chargePower / MAX_CHARGE) * 1.2;
+                powerBarFill.scale.x = Math.max(0.001, scaleX / 1.2);
+                powerBarFill.position.x = previewDie.position.x - (1.2 - scaleX) / 2;
+            }
+
+            for (let i = 0; i < diceList.length; i++) {
+                const d1 = diceList[i];
+                d1.userData.velocity.y -= GRAVITY;
+                d1.position.add(d1.userData.velocity);
+                
+                if (d1.position.y <= 0.45) {
+                    d1.userData.velocity.x *= 0.94;
+                    d1.userData.velocity.z *= 0.94;
+                    if (d1.userData.velocity.length() < 0.01 && !d1.userData.isAligning) {
+                        d1.userData.isAligning = true;
+                        new TWEEN.Tween(d1.rotation).to({ x: 0, y: 0, z: 0 }, 200).start();
+                    }
+                }
+
+                if (d1.position.y < 0.45) {
+                    d1.position.y = 0.45;
+                    d1.userData.velocity.y *= -0.3;
+                }
+
+                if (Math.abs(d1.position.x) > ARENA_WIDTH/2 - 0.45) {
+                    d1.userData.velocity.x *= -0.5;
+                    d1.position.x = Math.sign(d1.position.x) * (ARENA_WIDTH/2 - 0.45);
+                }
+                if (d1.position.z < -HALF_DEPTH + 0.45) {
+                    d1.userData.velocity.z *= -0.5;
+                    d1.position.z = -HALF_DEPTH + 0.45;
+                }
+                if (d1.position.z > HALF_DEPTH - 0.45) {
+                    d1.userData.velocity.z *= -0.5;
+                    d1.position.z = HALF_DEPTH - 0.45;
+                }
+
+                for (let j = i + 1; j < diceList.length; j++) {
+                    const d2 = diceList[j];
+                    const dist = d1.position.distanceTo(d2.position);
+                    if (dist < DICE_SIZE * 0.9) {
+                        if (d1.userData.value === d2.userData.value) {
+                            handleMerge(d1, d2);
+                            return;
+                        }
+                        const collisionNormal = new THREE.Vector3().subVectors(d1.position, d2.position).normalize();
+                        const relativeVelocity = new THREE.Vector3().subVectors(d1.userData.velocity, d2.userData.velocity);
+                        const speed = relativeVelocity.dot(collisionNormal);
+                        if (speed < 0) {
+                            const impulse = collisionNormal.multiplyScalar(-speed * 0.7);
+                            d1.userData.velocity.add(impulse);
+                            d2.userData.velocity.sub(impulse);
+                        }
+                    }
+                }
+            }
+        }
+
+        async function handleMerge(d1, d2) {
+            const index1 = diceList.indexOf(d1);
+            const index2 = diceList.indexOf(d2);
+            if (index1 === -1 || index2 === -1) return;
+            const newVal = d1.userData.value * 2;
+            score += newVal;
+            updateUI();
+            const pos = d1.position.clone().lerp(d2.position, 0.5);
+            scene.remove(d1);
+            scene.remove(d2);
+            diceList.splice(Math.max(index1, index2), 1);
+            diceList.splice(Math.min(index1, index2), 1);
+            const newDie = createCube(newVal);
+            newDie.position.copy(pos);
+            newDie.userData.velocity.set((Math.random() - 0.5) * 0.1, 0.3, -0.05);
+            newDie.scale.set(0.1, 0.1, 0.1);
+            scene.add(newDie);
+            diceList.push(newDie);
+            new TWEEN.Tween(newDie.scale).to({ x: 1, y: 1, z: 1 }, 250).easing(TWEEN.Easing.Back.Out).start();
+        }
+
+        function updateUI() {
+            document.getElementById('score').innerText = score;
+            const q = document.getElementById('queue-display');
+            q.innerHTML = '';
+            diceQueue.forEach((val, i) => {
+                const d = document.createElement('div');
+                d.className = `die-preview-ui bg-${val} ${i===0 ? 'active-preview' : 'opacity-40 scale-75'}`;
+                d.innerText = val;
+                q.appendChild(d);
+            });
+        }
+
+        function resetGame() { initGameData(); }
+        function onWindowResize() { 
+            camera.aspect = window.innerWidth / window.innerHeight; 
+            camera.updateProjectionMatrix(); 
+            renderer.setSize(window.innerWidth, window.innerHeight); 
+        }
+        function animate(time) { 
+            requestAnimationFrame(animate); 
+            TWEEN.update(time); 
+            updatePhysics(); 
+            renderer.render(scene, camera); 
+        }
+        window.onload = init;
+    </script>
+</body>
+</html>
